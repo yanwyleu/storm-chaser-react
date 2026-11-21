@@ -2,20 +2,21 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useNavigate } from "@tanstack/react-router";
+import type { LatLon } from "@/lib/geo";
 import type { Area } from "@/lib/storms";
 
-export default function StormMap({ focus, areas, mode = "storm" }: { focus?: [number, number] | undefined; areas: Area[]; mode?: "storm" | "pressure" }) {
+export default function StormMap({ focus, center, areas, mode = "storm" }: { focus?: [number, number] | undefined; center?: LatLon | undefined; areas: Area[]; mode?: "storm" | "pressure" }) {
   const ref = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const navRef = useRef(nav);
   navRef.current = nav;
-  const lat = focus?.[0], lng = focus?.[1];
+  const lat = focus?.[0] ?? center?.lat, lng = focus?.[1] ?? center?.lon;
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const css = getComputedStyle(document.documentElement);
-    const map = L.map(el).setView(lat != null && lng != null ? [lat, lng] : [39, -82], lat != null ? 7 : 4);
+    const map = L.map(el).setView(lat != null && lng != null ? [lat, lng] : [43.65, -79.38], lat != null ? 7 : 4);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors" }).addTo(map);
     for (const a of areas) {
       if (mode === "pressure") {

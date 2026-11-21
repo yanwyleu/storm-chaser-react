@@ -1,52 +1,55 @@
+import { DEFAULT_CENTER, type LatLon } from "@/lib/geo";
 import { CITIES, status, type Reading } from "@/lib/pressure";
 import { pressureHistoryChart } from "@/lib/pressure-chart";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { MapPin } from "lucide-react";
+import { LocateFixed } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 export type PressureMapHandle = { resetView: () => void };
 
-export default function PressureMap({ readings, focus, onPick, mapRef }: { readings: Reading[]; focus?: { lat: number; lon: number; name: string; nonce: number } | undefined; onPick: (lat: number, lon: number) => void; mapRef?: React.RefObject<PressureMapHandle | null> | undefined }) {
+const isDeviceCenter = (c: LatLon) => c.lat !== DEFAULT_CENTER.lat || c.lon !== DEFAULT_CENTER.lon;
+
+export default function PressureMap({ readings, focus, center = DEFAULT_CENTER, onPick, mapRef }: { readings: Reading[]; focus?: { lat: number; lon: number; name: string; nonce: number } | undefined; center?: LatLon | undefined; onPick: (lat: number, lon: number) => void; mapRef?: React.RefObject<PressureMapHandle | null> | undefined }) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
-  const markers = useRef(new Map<string, L.Marker>());
+  const markers = useRef(new globalThis.Map<string, L.Marker>());
   const pickRef = useRef(onPick);
   pickRef.current = onPick;
+  // Latest centre, readable from the mount-once effect and the Leaflet control.
+  const centerRef = useRef<LatLon>(center);
+  const setViewRef = useRef<(m: L.Map, c: LatLon) => void>(() => {});
 
   useEffect(() => {
     if (!el.current || map.current) return;
     const isMobile = el.current.clientWidth < 640;
     map.current = L.map(el.current, { worldCopyJump: true });
-    const initialView = (m: L.Map) => {
-      if (isMobile) {
-        const canadaCityBounds = L.latLngBounds(CITIES.map(([, lat, lon]) => [lat, lon] as L.LatLngTuple));
-        m.fitBounds(canadaCityBounds, {
-          paddingTopLeft: L.point(48, 88),
-          paddingBottomRight: L.point(48, 92),
-          maxZoom: 3,
-          animate: false,
-        });
-      } else {
-        m.setView([43.65, -79.38], 4);
-      }
-    };
-    initialView(map.current);
 
-    if (mapRef) mapRef.current = { resetView: () => map.current && initialView(map.current) };
+    const fitsCanada = (m: L.Map) => m.fitBounds(
+      L.latLngBounds(CITIES.map(([, lat, lon]) => [lat, lon] as L.LatLngTuple)),
+      { paddingTopLeft: L.point(48, 88), paddingBottomRight: L.point(48, 92), maxZoom: 3, animate: false },
+    );
+    const applyCenter = (m: L.Map, c: LatLon) => {
+      if (isMobile) { fitsCanada(m); return; }
+      m.setView([c.lat, c.lon], isDeviceCenter(c) ? 7 : 4, { animate: false });
+    };
+    setViewRef.current = applyCenter;
+    applyCenter(map.current, centerRef.current);
+
+    if (mapRef) mapRef.current = { resetView: () => map.current && setViewRef.current(map.current, centerRef.current) };
 
     const reset = L.Control.extend({
       options: { position: "bottomright" as L.ControlPosition },
       onAdd: (m: L.Map) => {
         const btn = L.DomUtil.create("button", "map-reset-btn") as HTMLButtonElement;
         btn.type = "button";
-        btn.title = "Reset to initial view";
-        btn.setAttribute("aria-label", "Reset to initial view");
-        btn.innerHTML = renderToStaticMarkup(<MapPin className="h-4 w-4" />);
+        btn.title = "Recentre map";
+        btn.setAttribute("aria-label", "Recentre map");
+        btn.innerHTML = renderToStaticMarkup(<LocateFixed className="h-4 w-4" />);
         L.DomEvent.disableClickPropagation(btn);
-        L.DomEvent.on(btn, "click", (e) => { L.DomEvent.stop(e); initialView(m); });
+        L.DomEvent.on(btn, "click", (e) => { L.DomEvent.stop(e); setViewRef.current(m, centerRef.current); });
         return btn;
       },
     });
@@ -76,7 +79,17 @@ export default function PressureMap({ readings, focus, onPick, mapRef }: { readi
       .catch(() => {});
     map.current.on("click", (e) => pickRef.current(e.latlng.lat, e.latlng.lng));
     return () => { map.current?.remove(); map.current = null; };
-  }, []);
+  }, [mapRef]);
+
+  // Geolocation resolves after mount: glide to the device position once it arrives.
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const prev = centerRef.current;
+    if (prev.lat === center.lat && prev.lon === center.lon) return;
+    centerRef.current = center;
+    setViewRef.current(m, center);
+  }, [center]);
 
   useEffect(() => {
     layer.current?.clearLayers();

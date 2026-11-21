@@ -3,6 +3,7 @@ import { ConditionIcon } from "@/components/storm/ConditionIcon";
 import { LazyMap } from "@/components/storm/LazyMap";
 import { LazyPressureMap } from "@/components/storm/LazyPressureMap";
 import { SeverityBadge } from "@/components/storm/SeverityBadge";
+import { DEFAULT_CENTER, initialCenter, type LatLon } from "@/lib/geo";
 import { CITIES, fetchReadings, Reading, status } from "@/lib/pressure";
 import { liveAreasQuery, severityRank } from "@/lib/storms";
 import { useQuery } from "@tanstack/react-query";
@@ -20,7 +21,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const [tab, setTab] = useState<"map" | "list" | "pressure" | "storm">("map");
+  const [tab, setTab] = useState < "pressure" | "map" | "list" >("map");
   const [layer, setLayer] = useState<"storm" | "pressure">("storm");
   const { data, isLoading, error, dataUpdatedAt } = useQuery(liveAreasQuery);
   const areas = data ?? [];
@@ -45,6 +46,16 @@ function Index() {
   const [picked, setPicked] = useState<{ lat: number; lon: number } | null>(null);
   const [focus, setFocus] = useState<{ lat: number; lon: number; name: string; nonce: number } | null>(null);
   const pressureMap = useRef<PressureMapHandle | null>(null);
+
+  // Map start point: device location when granted, Toronto otherwise.
+  const [center, setCenter] = useState<LatLon>(DEFAULT_CENTER);
+  const [locating, setLocating] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    initialCenter().then((c) => { if (alive) { setCenter(c); setLocating(false); } });
+    return () => { alive = false; };
+  }, []);
+  const usingDevice = center.lat !== DEFAULT_CENTER.lat || center.lon !== DEFAULT_CENTER.lon;
   const nearest = picked
     ? readings.reduce<Reading | null>((best, r) => {
         const d = (r.lat - picked.lat) ** 2 + (r.lon - picked.lon) ** 2;
@@ -64,12 +75,15 @@ function Index() {
         <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Stormwatch · Live</p>
         <h1 className="font-display text-3xl">{isLoading ? "Loading live weather…" : error ? "Weather unavailable" : `${active} of ${areas.length} areas under watch`}</h1>
         {dataUpdatedAt > 0 && <p className="text-xs text-muted-foreground">Updated {new Date(dataUpdatedAt).toLocaleTimeString()}</p>}
+        <p className="text-xs text-muted-foreground">
+          {locating ? "Locating you…" : usingDevice ? "Centred on your location" : "Showing Toronto (default)"}
+        </p>
         {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
       </header>
       <div className="mx-5 mb-4 grid grid-cols-3 rounded-full bg-secondary p-1 text-sm">
-        {(["map", "list", "pressure"] as const).map((t) => (
+        {(["pressure", "map", "list" ] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} className={`rounded-full py-2 transition ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
-            {t === "map" ? "Weather map" : t === "list" ? "Area list" : "Pressure"}
+            {t === "map" ? "Weather map" : t === "list" ? "Area list" : "Storm Radar"}
           </button>
         ))}
       </div>
@@ -82,7 +96,7 @@ function Index() {
               </button>
             ))}
           </div>
-          <div className="h-[58vh] overflow-hidden rounded-3xl border border-border"><LazyMap areas={areas} mode={layer} /></div>
+          <div className="h-[58vh] overflow-hidden rounded-3xl border border-border"><LazyMap areas={areas} mode={layer} center={center} /></div>
           {layer === "pressure" && (
             <div className="storm-card mt-3">
               <div className="mb-2 flex justify-between text-xs text-muted-foreground">
@@ -102,7 +116,7 @@ function Index() {
       ) : tab === "pressure" ? (
         <div className="px-5">
           <div className="mb-3 h-[58vh] overflow-hidden rounded-3xl border border-border">
-            <LazyPressureMap readings={readings} focus={focus ?? undefined} onPick={(lat, lon) => setPicked({ lat, lon })} mapRef={pressureMap} />
+            <LazyPressureMap readings={readings} focus={focus ?? undefined} center={center} onPick={(lat, lon) => setPicked({ lat, lon })} mapRef={pressureMap} />
           </div>
           {fetchError && <p className="mt-2 text-sm text-destructive">Pressure data unavailable: {fetchError}</p>}
           {!fetchError && !readings.length && <p className="mt-2 text-sm text-muted-foreground">Loading pressure readings…</p>}
