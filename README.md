@@ -1,4 +1,4 @@
-# Stormwatch
+# Storm Chaser
 
 Live storm-tracking web app. It pulls current conditions from
 [Open-Meteo](https://open-meteo.com) for six North American cities, scores each
