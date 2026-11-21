@@ -266,13 +266,6 @@ src/
   styles.css            theme tokens incl. --sev-* and --pressure-*
 ```
 
-## Lovable workflow
-
-This project is connected to Lovable. Do not force-push or rewrite published
-history — it breaks the Lovable side of the link and can lose project history.
-Schema changes and generated files are handled in Lovable; keep `LOVABLE_API_KEY`
-and other secrets out of the repository.
-
 ## Attributions
 
 - Weather data: [Open-Meteo](https://open-meteo.com) (CC BY 4.0)
