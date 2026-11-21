@@ -1,6 +1,7 @@
 import type { PressureMapHandle } from "@/components/PressureMap";
 import { ConditionIcon } from "@/components/storm/ConditionIcon";
 import { LazyMap } from "@/components/storm/LazyMap";
+import type { StormMapHandle } from "@/components/storm/StormMap";
 import { LazyPressureMap } from "@/components/storm/LazyPressureMap";
 import { SeverityBadge } from "@/components/storm/SeverityBadge";
 import { DEFAULT_CENTER, initialCenter, type LatLon } from "@/lib/geo";
@@ -11,40 +12,75 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 export const Route = createFileRoute("/")({
-  head: () => ({ meta: [
-    { title: "Stormwatch — Live storm map & alerts" },
-    { name: "description", content: "Track live storm conditions on a map, browse areas and see detailed current weather." },
-    { property: "og:title", content: "Stormwatch — Live storm map & alerts" },
-    { property: "og:description", content: "Track live storm conditions on a map, browse areas and see detailed current weather." },
-  ] }),
+  head: () => ({
+    meta: [
+      { title: "Stormwatch — Live storm map & alerts" },
+      {
+        name: "description",
+        content:
+          "Track live storm conditions on a map, browse areas and see detailed current weather.",
+      },
+      { property: "og:title", content: "Stormwatch — Live storm map & alerts" },
+      {
+        property: "og:description",
+        content:
+          "Track live storm conditions on a map, browse areas and see detailed current weather.",
+      },
+    ],
+  }),
   component: Index,
 });
 
 function Index() {
-  const [tab, setTab] = useState < "pressure" | "map" | "list" >("map");
+  const [tab, setTab] = useState<"pressure" | "map" | "list">("map");
   const [layer, setLayer] = useState<"storm" | "pressure">("storm");
   const { data, isLoading, error, dataUpdatedAt } = useQuery(liveAreasQuery);
   const areas = data ?? [];
-  const sorted = [...areas].sort((a, b) => severityRank[b.severity] - severityRank[a.severity] || b.gust - a.gust);
+  const sorted = [...areas].sort(
+    (a, b) =>
+      severityRank[b.severity] - severityRank[a.severity] || b.gust - a.gust,
+  );
   const active = areas.filter((a) => a.severity !== "calm").length;
 
   const [readings, setReadings] = useState<Reading[]>([]);
   const [fetchError, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchReadings(CITIES.map(([name, lat, lon]) => ({ name, lat, lon }))).then(setReadings).catch((e) => setError(e.message));
+    fetchReadings(CITIES.map(([name, lat, lon]) => ({ name, lat, lon })))
+      .then(setReadings)
+      .catch((e) => setError(e.message));
   }, []);
 
   const pick = async (lat: number, lon: number) => {
     try {
-      const [r] = await fetchReadings([{ name: `Point ${lat.toFixed(2)}, ${lon.toFixed(2)}`, lat, lon }]);
+      const [r] = await fetchReadings([
+        { name: `Point ${lat.toFixed(2)}, ${lon.toFixed(2)}`, lat, lon },
+      ]);
       if (!r) return;
-      setReadings((prev) => [r, ...prev.filter((p) => !p.name.startsWith("Point"))]);
-    } catch (e: any) { setError(e.message); }
+      setReadings((prev) => [
+        r,
+        ...prev.filter((p) => !p.name.startsWith("Point")),
+      ]);
+    } catch (e: any) {
+      setError(e.message);
+    }
   };
 
-  const [picked, setPicked] = useState<{ lat: number; lon: number } | null>(null);
-  const [focus, setFocus] = useState<{ lat: number; lon: number; name: string; nonce: number } | null>(null);
+  const [picked, setPicked] = useState<{ lat: number; lon: number } | null>(
+    null,
+  );
+  const [focus, setFocus] = useState<{
+    lat: number;
+    lon: number;
+    name: string;
+    nonce: number;
+  } | null>(null);
+  // Area-list tab: the map above the list, plus the row the user last clicked.
+  const listMap = useRef<StormMapHandle | null>(null);
+  const [listSelection, setListSelection] = useState<{
+    id: string;
+    pin: boolean;
+  } | null>(null);
   const pressureMap = useRef<PressureMapHandle | null>(null);
 
   // Map start point: device location when granted, Toronto otherwise.
@@ -52,38 +88,79 @@ function Index() {
   const [locating, setLocating] = useState(true);
   useEffect(() => {
     let alive = true;
-    initialCenter().then((c) => { if (alive) { setCenter(c); setLocating(false); } });
-    return () => { alive = false; };
+    initialCenter().then((c) => {
+      if (alive) {
+        setCenter(c);
+        setLocating(false);
+      }
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
-  const usingDevice = center.lat !== DEFAULT_CENTER.lat || center.lon !== DEFAULT_CENTER.lon;
+  const usingDevice =
+    center.lat !== DEFAULT_CENTER.lat || center.lon !== DEFAULT_CENTER.lon;
   const nearest = picked
     ? readings.reduce<Reading | null>((best, r) => {
         const d = (r.lat - picked.lat) ** 2 + (r.lon - picked.lon) ** 2;
-        const bd = best ? (best.lat - picked.lat) ** 2 + (best.lon - picked.lon) ** 2 : Infinity;
+        const bd = best
+          ? (best.lat - picked.lat) ** 2 + (best.lon - picked.lon) ** 2
+          : Infinity;
         return d < bd ? r : best;
       }, null)
     : null;
 
   const selectReading = (r: Reading) => {
     setPicked({ lat: r.lat, lon: r.lon });
-    setFocus((f) => ({ lat: r.lat, lon: r.lon, name: r.name, nonce: (f?.nonce ?? 0) + 1 }));
+    setFocus((f) => ({
+      lat: r.lat,
+      lon: r.lon,
+      name: r.name,
+      nonce: (f?.nonce ?? 0) + 1,
+    }));
   };
 
   return (
     <div className="app-shell">
       <header className="px-5 pt-6 pb-4">
-        <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Stormwatch · Live</p>
-        <h1 className="font-display text-3xl">{isLoading ? "Loading live weather…" : error ? "Weather unavailable" : `${active} of ${areas.length} areas under watch`}</h1>
-        {dataUpdatedAt > 0 && <p className="text-xs text-muted-foreground">Updated {new Date(dataUpdatedAt).toLocaleTimeString()}</p>}
-        <p className="text-xs text-muted-foreground">
-          {locating ? "Locating you…" : usingDevice ? "Centred on your location" : "Showing Toronto (default)"}
+        <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">
+          Stormwatch · Live
         </p>
-        {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
+        <h1 className="font-display text-3xl">
+          {isLoading
+            ? "Loading live weather…"
+            : error
+              ? "Weather unavailable"
+              : `${active} of ${areas.length} areas under watch`}
+        </h1>
+        {dataUpdatedAt > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Updated {new Date(dataUpdatedAt).toLocaleTimeString()}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          {locating
+            ? "Locating you…"
+            : usingDevice
+              ? "Centred on your location"
+              : "Showing Toronto (default)"}
+        </p>
+        {error && (
+          <p className="text-sm text-destructive">{(error as Error).message}</p>
+        )}
       </header>
       <div className="mx-5 mb-4 grid grid-cols-3 rounded-full bg-secondary p-1 text-sm">
-        {(["pressure", "map", "list" ] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`rounded-full py-2 transition ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
-            {t === "map" ? "Weather map" : t === "list" ? "Area list" : "Storm Radar"}
+        {(["pressure", "map", "list"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`rounded-full py-2 transition ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+          >
+            {t === "map"
+              ? "Weather map"
+              : t === "list"
+                ? "Area list"
+                : "Storm Radar"}
           </button>
         ))}
       </div>
@@ -91,97 +168,230 @@ function Index() {
         <div className="px-5">
           <div className="mb-3 flex gap-2 text-sm">
             {(["storm", "pressure"] as const).map((l) => (
-              <button key={l} onClick={() => setLayer(l)} className={`rounded-full border border-border px-4 py-1.5 ${layer === l ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+              <button
+                key={l}
+                onClick={() => setLayer(l)}
+                className={`rounded-full border border-border px-4 py-1.5 ${layer === l ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+              >
                 {l === "storm" ? "Storms" : "Pressure"}
               </button>
             ))}
           </div>
-          <div className="h-[58vh] overflow-hidden rounded-3xl border border-border"><LazyMap areas={areas} mode={layer} center={center} /></div>
+          <div className="h-[58vh] overflow-hidden rounded-3xl border border-border">
+            <LazyMap areas={areas} mode={layer} center={center} />
+          </div>
           {layer === "pressure" && (
             <div className="storm-card mt-3">
               <div className="mb-2 flex justify-between text-xs text-muted-foreground">
-                <span className="flex items-center gap-1"><i className="dot-low inline-block h-3 w-3 rounded-full" /> Low &lt;1000</span>
-                <span className="flex items-center gap-1"><i className="dot-mid inline-block h-3 w-3 rounded-full" /> Normal</span>
-                <span className="flex items-center gap-1"><i className="dot-high inline-block h-3 w-3 rounded-full" /> High &gt;1020</span>
+                <span className="flex items-center gap-1">
+                  <i className="dot-low inline-block h-3 w-3 rounded-full" />{" "}
+                  Low &lt;1000
+                </span>
+                <span className="flex items-center gap-1">
+                  <i className="dot-mid inline-block h-3 w-3 rounded-full" />{" "}
+                  Normal
+                </span>
+                <span className="flex items-center gap-1">
+                  <i className="dot-high inline-block h-3 w-3 rounded-full" />{" "}
+                  High &gt;1020
+                </span>
               </div>
               <ul className="space-y-1 text-sm">
-                {[...areas].sort((a, b) => a.pressure - b.pressure).map((a) => (
-                  <li key={a.id} className="flex justify-between"><span>{a.name}</span><span className="font-display">{a.pressure} hPa</span></li>
-                ))}
+                {[...areas]
+                  .sort((a, b) => a.pressure - b.pressure)
+                  .map((a) => (
+                    <li key={a.id} className="flex justify-between">
+                      <span>{a.name}</span>
+                      <span className="font-display">{a.pressure} hPa</span>
+                    </li>
+                  ))}
               </ul>
-              <p className="mt-2 text-xs text-muted-foreground">Low pressure usually means stormier weather.</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Low pressure usually means stormier weather.
+              </p>
             </div>
           )}
         </div>
       ) : tab === "pressure" ? (
         <div className="px-5">
           <div className="mb-3 h-[58vh] overflow-hidden rounded-3xl border border-border">
-            <LazyPressureMap readings={readings} focus={focus ?? undefined} center={center} onPick={(lat, lon) => setPicked({ lat, lon })} mapRef={pressureMap} />
+            <LazyPressureMap
+              readings={readings}
+              focus={focus ?? undefined}
+              center={center}
+              onPick={(lat, lon) => setPicked({ lat, lon })}
+              mapRef={pressureMap}
+            />
           </div>
-          {fetchError && <p className="mt-2 text-sm text-destructive">Pressure data unavailable: {fetchError}</p>}
-          {!fetchError && !readings.length && <p className="mt-2 text-sm text-muted-foreground">Loading pressure readings…</p>}
+          {fetchError && (
+            <p className="mt-2 text-sm text-destructive">
+              Pressure data unavailable: {fetchError}
+            </p>
+          )}
+          {!fetchError && !readings.length && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Loading pressure readings…
+            </p>
+          )}
           {nearest && (
             <div className="storm-card mt-3">
               <div className="mb-2 flex items-center justify-between">
                 <span className="font-display text-xl">{nearest.name}</span>
-                <span className="text-xs text-muted-foreground">{nearest.name === focus?.name ? "Selected station" : "Nearest station to your tap"}</span>
+                <span className="text-xs text-muted-foreground">
+                  {nearest.name === focus?.name
+                    ? "Selected station"
+                    : "Nearest station to your tap"}
+                </span>
               </div>
               <div className="grid grid-cols-3 gap-2 text-sm">
-                <div><p className="text-xs text-muted-foreground">Sea level</p><p className="font-display text-lg">{Math.round(nearest.msl)} hPa</p></div>
-                <div><p className="text-xs text-muted-foreground">Surface</p><p className="font-display text-lg">{Math.round(nearest.surface)} hPa</p></div>
-                <div><p className="text-xs text-muted-foreground">Temp</p><p className="font-display text-lg">{nearest.temp}°</p></div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Sea level</p>
+                  <p className="font-display text-lg">
+                    {Math.round(nearest.msl)} hPa
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Surface</p>
+                  <p className="font-display text-lg">
+                    {Math.round(nearest.surface)} hPa
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Temp</p>
+                  <p className="font-display text-lg">{nearest.temp}°</p>
+                </div>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">Status: {status(nearest.msl).label}. Tap the map to inspect another station.</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Status: {status(nearest.msl).label}. Tap the map to inspect
+                another station.
+              </p>
             </div>
           )}
-          {!nearest && !fetchError && readings.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Tap the map or a station below to zoom in.</p>}
+          {!nearest && !fetchError && readings.length > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Tap the map or a station below to zoom in.
+            </p>
+          )}
           <ul className="mt-3 space-y-1 text-sm">
-            {[...readings].sort((a, b) => a.msl - b.msl).map((r) => (
-              <li key={r.name}>
-                <button
-                  type="button"
-                  onClick={() => selectReading(r)}
-                  className={`flex w-full items-center justify-between gap-2 rounded-xl px-2 py-1.5 text-left transition hover:bg-secondary ${focus?.name === r.name ? "bg-secondary" : ""}`}
-                >
-                  <span className="flex items-center gap-2">
-                    <ConditionIcon reading={r} className={`h-4 w-4 shrink-0 ${r.msl < 1000 ? "text-[var(--pressure-low)]" : r.msl > 1020 ? "text-[var(--pressure-high)]" : "text-[var(--pressure-mid)]"}`} />
-                    <span>
-                      {r.name}
-                      <span className="block text-xs text-muted-foreground">
-                        {r.msl < 1000 ? "Low pressure · stormy" : r.msl > 1020 ? "High pressure · fair" : "Normal pressure · settled"}
+            {[...readings]
+              .sort((a, b) => a.msl - b.msl)
+              .map((r) => (
+                <li key={r.name}>
+                  <button
+                    type="button"
+                    onClick={() => selectReading(r)}
+                    className={`flex w-full items-center justify-between gap-2 rounded-xl px-2 py-1.5 text-left transition hover:bg-secondary ${focus?.name === r.name ? "bg-secondary" : ""}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <ConditionIcon
+                        reading={r}
+                        className={`h-4 w-4 shrink-0 ${r.msl < 1000 ? "text-[var(--pressure-low)]" : r.msl > 1020 ? "text-[var(--pressure-high)]" : "text-[var(--pressure-mid)]"}`}
+                      />
+                      <span>
+                        {r.name}
+                        <span className="block text-xs text-muted-foreground">
+                          {r.msl < 1000
+                            ? "Low pressure · stormy"
+                            : r.msl > 1020
+                              ? "High pressure · fair"
+                              : "Normal pressure · settled"}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  <span className="shrink-0 text-right">
-                    <span className="block font-display">{Math.round(r.msl)} hPa</span>
-                    <span className="block text-xs text-muted-foreground">{status(r.msl).label}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
+                    <span className="shrink-0 text-right">
+                      <span className="block font-display">
+                        {Math.round(r.msl)} hPa
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {status(r.msl).label}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
           </ul>
-          <p className="mt-2 pb-10 text-xs text-muted-foreground">Low pressure usually means stormier weather. Radar © RainViewer.</p>
+          <p className="mt-2 pb-10 text-xs text-muted-foreground">
+            Low pressure usually means stormier weather. Radar © RainViewer.
+          </p>
         </div>
-        )
-        : (
-        <ul className="space-y-3 px-5 pb-10">
-          {sorted.map((a) => (
-            <li key={a.id}>
-              <Link to="/area/$id" params={{ id: a.id }} className="storm-card flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2"><span className="font-display text-xl">{a.name}</span><SeverityBadge s={a.severity} /></div>
-                  <p className="text-sm text-muted-foreground">{a.region} · {a.condition}</p>
-                </div>
-                <div className="text-right">
-                  <div className="font-display text-3xl">{a.temp}°</div>
-                  <div className="text-xs text-muted-foreground">gusts {a.gust} km/h</div>
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
+      ) : (
+        <div className="px-5">
+          <div className="mb-2 h-[38vh] overflow-hidden rounded-3xl border border-border">
+            <LazyMap
+              areas={areas}
+              mode="storm"
+              center={center}
+              selected={listSelection ?? undefined}
+              mapRef={listMap}
+            />
+          </div>
+          <p className="mb-3 text-xs text-muted-foreground">
+            {listSelection
+              ? `Map zoomed to ${areas.find((a) => a.id === listSelection.id)?.name ?? "the selected area"}. `
+              : "Click an area to zoom the map to it. "}
+            Tap a row again to refine it, or open the area for full detail.
+          </p>
+          <ul className="space-y-3 pb-10">
+            {sorted.map((a) => {
+              const isSelected = listSelection?.id === a.id;
+              return (
+                <li key={a.id}>
+                  <div
+                    className={`storm-card flex items-center justify-between transition ${isSelected ? "ring-2 ring-ring" : ""}`}
+                    onMouseEnter={() =>
+                      setListSelection({ id: a.id, pin: false })
+                    }
+                    onClick={() => {
+                      setListSelection({ id: a.id, pin: true });
+                      listMap.current?.focusOn(a.lat, a.lng);
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Zoom map to ${a.name}`}
+                    aria-pressed={isSelected}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setListSelection({ id: a.id, pin: true });
+                        listMap.current?.focusOn(a.lat, a.lng);
+                      }
+                    }}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-display text-xl">{a.name}</span>
+                        <SeverityBadge s={a.severity} />
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {a.region} · {a.condition}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 text-right">
+                      <div>
+                        <div className="font-display text-3xl">{a.temp}°</div>
+                        <div className="text-xs text-muted-foreground">
+                          gusts {a.gust} km/h
+                        </div>
+                      </div>
+                      <Link
+                        to="/area/$id"
+                        params={{ id: a.id }}
+                        className="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary"
+                        aria-label={`Open ${a.name} detail`}
+                      >
+                        Details ›
+                      </Link>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
-      <p className="px-5 pb-6 text-xs text-muted-foreground">Weather data by Open-Meteo.com</p>
+      <p className="px-5 pb-6 text-xs text-muted-foreground">
+        Weather data by Open-Meteo.com
+      </p>
     </div>
   );
 }
